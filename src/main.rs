@@ -1,10 +1,27 @@
+use clap::{Parser, Subcommand};
 use nix::mount::{mount, MsFlags};
 use nix::sched::{unshare, CloneFlags};
 use nix::sys::wait::waitpid;
 use nix::unistd::{execvp, fork, getgid, getppid, getuid, ForkResult, Gid, Uid};
 use std::ffi::CString;
 use std::fs;
+use std::path::Path;
 use std::process::{exit, Command};
+
+#[derive(Parser)]
+#[command(author, version, about)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    Enter {
+        #[arg(value_name = "LAYER_NAME")]
+        layer_name: String,
+    },
+}
 
 fn clone_user_namespace(to_uid: Uid, to_gid: Gid, clone_mount: bool) {
     match unsafe { fork() } {
@@ -51,22 +68,12 @@ fn clone_user_namespace(to_uid: Uid, to_gid: Gid, clone_mount: bool) {
     }
 }
 
-fn main() {
-    let root_dir = dirs::home_dir().unwrap();
-    let holo_dir = root_dir.join(".holo");
-    let layers_dir = holo_dir.join("layers");
-
-    let uid = getuid();
-    let gid = getgid();
-    clone_user_namespace(0.into(), 0.into(), true);
-
-    let layer_dir = layers_dir.join("hoge");
-    let entries_dir = layer_dir.join("entries");
+fn mount_entries<P: AsRef<Path>>(root_dir: P, entries_dir: P) {
     for dir in fs::read_dir(entries_dir).unwrap() {
         let dir = dir.unwrap();
         let name = dir.file_name();
 
-        let target_path = root_dir.join(name);
+        let target_path = root_dir.as_ref().to_path_buf().join(name);
 
         let flags = MsFlags::empty();
         mount(
@@ -86,6 +93,22 @@ fn main() {
         )
         .unwrap();
     }
+}
+
+fn main() {
+    let cli = Cli::parse();
+    let Commands::Enter { layer_name } = cli.command;
+    let root_dir = dirs::home_dir().unwrap();
+    let holo_dir = root_dir.join(".holo");
+    let layers_dir = holo_dir.join("layers");
+
+    let uid = getuid();
+    let gid = getgid();
+    clone_user_namespace(0.into(), 0.into(), true);
+
+    let layer_dir = layers_dir.join(layer_name);
+    let entries_dir = layer_dir.join("entries");
+    mount_entries(root_dir, entries_dir);
 
     clone_user_namespace(uid, gid, false);
 
