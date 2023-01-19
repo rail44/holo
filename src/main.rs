@@ -1,51 +1,70 @@
 use nix::mount::{mount, MsFlags};
 use nix::sched::{unshare, CloneFlags};
-use nix::unistd::{execvp, fork, getppid, ForkResult};
-use std::process::Command;
-
+use nix::sys::wait::waitpid;
+use nix::unistd::{execvp, fork, getgid, getppid, getuid, ForkResult, Gid, Uid};
+use std::process::{Command, exit};
 use std::ffi::CString;
-fn main() {
+
+fn clone_user_namespace(to_uid: Uid, to_gid: Gid, clone_mount: bool) {
     match unsafe { fork() } {
-        Ok(ForkResult::Parent { .. }) => {
-            let flags = CloneFlags::CLONE_NEWUSER | CloneFlags::CLONE_NEWNS;
+        Ok(ForkResult::Parent { child, .. }) => {
+            let mut flags = CloneFlags::CLONE_NEWUSER;
+            if clone_mount {
+                flags.insert(CloneFlags::CLONE_NEWNS);
+            }
             unshare(flags).unwrap();
+            waitpid(child, None).unwrap();
 
-            let flags = MsFlags::MS_BIND;
-            mount(
-                Some("/home/satoshi/tmp/hoge"),
-                "/home/satoshi/tmp/fuga",
-                None::<&str>,
-                flags,
-                None::<&str>,
-            )
-            .unwrap();
-
-            // TODO: wait to create id mapping on child
-            let shell = CString::new("fish").unwrap();
-            execvp(&shell, &[shell.clone()]).unwrap();
+            if clone_mount {
+                // to prevent propagation
+                let flags = MsFlags::MS_REC | MsFlags::MS_SLAVE;
+                mount(None::<&str>, "/", None::<&str>, flags, None::<&str>).unwrap();
+            }
         }
         Ok(ForkResult::Child) => {
-            let pid = getppid();
+            let ppid = getppid();
+            let from_uid = getuid();
+            let from_gid = getgid();
             // TODO: wait to unshare on parrent
             Command::new("newuidmap")
                 .args([
-                    pid.to_string(),
-                    "0".to_string(),
-                    "1000".to_string(),
-                    "1".to_string()
+                    ppid.to_string(),
+                    to_uid.to_string(),
+                    from_uid.to_string(),
+                    "1".to_string(),
                 ])
                 .output()
                 .unwrap();
             Command::new("newgidmap")
                 .args([
-                    pid.to_string(),
-                    "0".to_string(),
-                    "1000".to_string(),
+                    ppid.to_string(),
+                    to_gid.to_string(),
+                    from_gid.to_string(),
                     "1".to_string(),
                 ])
                 .output()
                 .unwrap();
+            exit(0);
         }
-        Err(_) => println!("Fork failed"),
+        Err(_) => panic!("Fork failed"),
     }
+}
+
+fn main() {
+    let uid = getuid();
+    let gid = getgid();
+    clone_user_namespace(0.into(), 0.into(), true);
+    let flags = MsFlags::MS_BIND;
+    mount(
+        Some("/home/satoshi/tmp/hoge"),
+        "/home/satoshi/tmp/fuga",
+        None::<&str>,
+        flags,
+        None::<&str>,
+    )
+    .unwrap();
+    clone_user_namespace(uid, gid, false);
+
+    let shell = CString::new("fish").unwrap();
+    execvp(&shell, &[shell.clone()]).unwrap();
 }
