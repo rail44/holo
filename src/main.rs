@@ -108,6 +108,16 @@ fn main() {
 
     let layer_dir = layers_dir.join(layer_name);
     let entries_dir = layer_dir.join("entries");
+    if !entries_dir.exists() {
+        fs::create_dir_all(entries_dir.clone()).unwrap();
+    }
+
+    let entry_dir = entries_dir.join("holo");
+    if !entry_dir.exists() {
+        fs::create_dir(&entry_dir).unwrap();
+        fs::create_dir(entry_dir.join("filesystem")).unwrap();
+        fs::create_dir(entry_dir.join("work")).unwrap();
+    }
     mount_entries(root_dir, entries_dir);
 
     clone_user_namespace(uid, gid, false);
