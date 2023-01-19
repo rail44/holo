@@ -2,8 +2,9 @@ use nix::mount::{mount, MsFlags};
 use nix::sched::{unshare, CloneFlags};
 use nix::sys::wait::waitpid;
 use nix::unistd::{execvp, fork, getgid, getppid, getuid, ForkResult, Gid, Uid};
-use std::process::{Command, exit};
 use std::ffi::CString;
+use std::fs;
+use std::process::{exit, Command};
 
 fn clone_user_namespace(to_uid: Uid, to_gid: Gid, clone_mount: bool) {
     match unsafe { fork() } {
@@ -51,18 +52,31 @@ fn clone_user_namespace(to_uid: Uid, to_gid: Gid, clone_mount: bool) {
 }
 
 fn main() {
+    let root_dir = dirs::home_dir().unwrap();
+    let holo_dir = root_dir.join(".holo");
+    let layers_dir = holo_dir.join("layers");
+
     let uid = getuid();
     let gid = getgid();
     clone_user_namespace(0.into(), 0.into(), true);
-    let flags = MsFlags::MS_BIND;
-    mount(
-        Some("/home/satoshi/tmp/hoge"),
-        "/home/satoshi/tmp/fuga",
-        None::<&str>,
-        flags,
-        None::<&str>,
-    )
-    .unwrap();
+
+    let layer_dir = layers_dir.join("hoge");
+    let entries_dir = layer_dir.join("entries");
+    for dir in fs::read_dir(entries_dir).unwrap() {
+        let dir = dir.unwrap();
+        let name = dir.file_name();
+
+        let flags = MsFlags::MS_BIND;
+        mount(
+            Some(&dir.path().join("filesystem")),
+            &root_dir.join(name),
+            None::<&str>,
+            flags,
+            None::<&str>,
+        )
+        .unwrap();
+    }
+
     clone_user_namespace(uid, gid, false);
 
     let shell = CString::new("fish").unwrap();
