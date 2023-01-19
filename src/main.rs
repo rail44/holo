@@ -66,13 +66,23 @@ fn main() {
         let dir = dir.unwrap();
         let name = dir.file_name();
 
-        let flags = MsFlags::MS_BIND;
+        let target_path = root_dir.join(name);
+
+        let flags = MsFlags::empty();
         mount(
-            Some(&dir.path().join("filesystem")),
-            &root_dir.join(name),
-            None::<&str>,
+            Some("overlay"),
+            &target_path,
+            Some("overlay"),
             flags,
-            None::<&str>,
+            Some(
+                format!(
+                    "lowerdir={},upperdir={},workdir={}",
+                    target_path.display(),
+                    dir.path().join("filesystem").display(),
+                    dir.path().join("work").display(),
+                )
+                .as_str(),
+            ),
         )
         .unwrap();
     }
